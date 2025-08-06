@@ -27,23 +27,25 @@ PRB extends a LoRA-adapted model with:
 
 **Register Bank**: Learnable parameters $R \in \mathbb{R}^{n \times d}$ where $n=6$ registers (one per emotion) and $d=64$ dimensions.
 
-**Gating Network**: Linear projection $W_g \in \mathbb{R}^{h \times n}$ computing attention over registers:
-$$g = \text{softmax}(W_g \cdot \text{mean}(H))$$
+**Gating Network**: Linear projection $W_g \in \mathbb{R}^{h \times n}$ computing gates over registers:
+$$g = \sigma(W_g \cdot \text{mean}(H))$$
+where $\sigma$ is the sigmoid function, followed by softmax normalization for weighting.
 
 **Update Network**: Per-register networks $f_i: \mathbb{R}^{h+d} \rightarrow \mathbb{R}^d$ that modify registers based on hidden states.
 
 ### 2.2 Training Procedure
 
 During forward passes:
-1. Initialize from parameter bank: $r_t = R$
-2. Compute gates from hidden states: $g = \text{softmax}(W_g \cdot h)$  
-3. Update registers: $r'_i = r_i + g_i \cdot \tanh(f_i([h; r_i]))$
-4. Blend: $r_{blend} = \sum_i g_i \cdot r'_i$
-5. Inject: $h' = h + \alpha \cdot W_r \cdot r_{blend}$ where $\alpha=0.1$
+1. Initialize from parameter bank: $r_t = R$ (with optional emotion bias)
+2. Compute gates from hidden states: $g = \sigma(W_g \cdot \text{mean}(h))$ where $\sigma$ is sigmoid
+3. Update registers: $r'_i = r_i + g_i \cdot \tanh(f_i([\text{mean}(h); r_i]))$
+4. Apply softmax for blending: $w = \text{softmax}(g)$
+5. Blend: $r_{blend} = \sum_i w_i \cdot r'_i$
+6. Inject: $h' = h + \alpha \cdot W_r \cdot r_{blend}$ where $\alpha$ is a learnable parameter initialized to 0.1
 
 ### 2.3 Implementation Details
 
-The model operates on text formatted as `[EMOTION] text` where emotions are encoded in the prefix. Registers learn to associate with specific emotional patterns through the gating mechanism. While emotion embeddings $E \in \mathbb{R}^{6 \times d}$ are defined in the architecture, the current implementation extracts emotional context from text prefixes alone, demonstrating robustness.
+The model operates on text formatted as `[EMOTION] text` where emotions are encoded in the prefix. The architecture includes emotion embeddings $E \in \mathbb{R}^{6 \times d}$ that can optionally bias register initialization when emotion IDs are provided. In practice, the model learns emotional associations through the gating mechanism applied to text representations, allowing it to function without explicit emotion IDs during inference.
 
 ## 3 Experiments
 
@@ -135,7 +137,7 @@ This finding challenges assumptions about monotonic scaling in parameter-efficie
 
 **Task Specificity**: Emotion classification with 6 categories may particularly benefit from register architecture.
 
-**Hyperparameters**: Fixed α=0.1 and other design choices are not optimized.
+**Hyperparameters**: The scale parameter α is learnable (initialized to 0.1), allowing the model to adjust register influence during training. Other design choices like register dimensions are fixed.
 
 ## 5 Related Work
 

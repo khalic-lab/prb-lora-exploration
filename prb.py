@@ -119,24 +119,6 @@ class LoRAWithRegisters(nn.Module):
         weighted_registers = (registers * register_weights.unsqueeze(-1)).sum(dim=1)  # [B, register_dim]
         register_info = self.register_proj(weighted_registers).unsqueeze(1)  # [B, 1, hidden_size]
         
-        # Track analytics if enabled
-        if hasattr(self, 'register_analytics'):
-            gate_entropy = -torch.sum(register_weights * torch.log(register_weights + 1e-8), dim=-1).mean()
-            
-            # Compute update magnitudes
-            update_mags = []
-            for i in range(self.n_registers):
-                orig_reg = self.register_bank[0, i, :].expand_as(registers[:, i, :])
-                update_mag = torch.norm(registers[:, i, :] - orig_reg, dim=-1).mean()
-                update_mags.append(update_mag)
-            
-            self.register_analytics.update(
-                gate_weights=register_weights.detach(),
-                gate_entropy=gate_entropy.detach(),
-                dominant_registers=torch.argmax(register_weights, dim=-1).detach(),
-                register_values=registers.detach(),
-                update_magnitudes=torch.stack(update_mags).detach()
-            )
         
         # Add register info to hidden states with learnable scale
         enhanced_hidden = hidden_states + self.register_scale * register_info
