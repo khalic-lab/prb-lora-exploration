@@ -227,8 +227,16 @@ def main():
         mlm=False,
     )
     
-    # Import custom callback for proper PEFT saving
-    from deinde.core.utils.model_saving import SavePeftModelCallback
+    # Define custom callback for proper PEFT saving
+    from transformers import TrainerCallback
+    
+    class SavePeftModelCallback(TrainerCallback):
+        def on_save(self, args, state, control, **kwargs):
+            checkpoint_folder = os.path.join(
+                args.output_dir, f"checkpoint-{state.global_step}"
+            )
+            kwargs["model"].save_pretrained(checkpoint_folder)
+            return control
     
     # Trainer
     trainer = Trainer(

@@ -4,3 +4,4 @@ datasets>=2.10.0
 peft>=0.4.0
 numpy>=1.24.0
 accelerate>=0.26.0
+evaluate>=0.4.0
