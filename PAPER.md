@@ -3,7 +3,6 @@
 Rafael Nogueira  
 Independent Researcher  
 https://github.com/khalic-lab/prb-lora-exploration
-[rflnogueira@me.com]
 
 ## Abstract
 
