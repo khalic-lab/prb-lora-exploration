@@ -1,0 +1,40 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Results and outputs
+results/
+*.png
+*.jpg
+*.jpeg
+
+# Virtual environments
+venv/
+env/
+ENV/
+path/
+*.venv
+.venv/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Model checkpoints
+checkpoint-*/
+*.pt
+*.pth
+*.bin
+*.safetensors

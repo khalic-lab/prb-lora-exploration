@@ -2,11 +2,20 @@
 
 Reproduction code for "Parametric Register Banks: A Memory-Augmented Approach to Parameter-Efficient Fine-Tuning"
 
+## Setup
+
+```bash
+# Create virtual environment
+python -m venv .venv
+source .venv/bin/activate  # On Windows: .venv\Scripts\activate
+
+# Install dependencies
+pip install -r requirements.txt
+```
+
 ## Usage
 
 ```bash
-pip install -r requirements.txt
-
 # Run baseline (LoRA r=32)
 python baseline.py
 

@@ -24,9 +24,7 @@ import random
 import argparse
 from datetime import datetime
 
-# Add parent directory to path
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from models.register_bank_unsupervised import RegisterBankTransformerUnsupervised
+from register_bank_unsupervised import RegisterBankTransformerUnsupervised
 
 
 class LoRAWithRegisters(nn.Module):
@@ -77,9 +75,6 @@ class LoRAWithRegisters(nn.Module):
         # Learnable register contribution scale
         self.register_scale = nn.Parameter(torch.tensor(0.1))
         
-        # Analytics container for diagnostics
-        from deinde.core.diagnostics.register_analytics import RegisterAnalytics
-        self.register_analytics = RegisterAnalytics()
         
     def forward(self, input_ids, attention_mask=None, labels=None, emotion_ids=None):
         B, L = input_ids.shape
@@ -481,11 +476,18 @@ def main():
     )
     
     # Import custom callback for proper PEFT saving and custom trainer
-    from deinde.core.utils.model_saving import SavePeftModelCallback
-    from deinde.core.trainers.register_trainer import RegisterTrainer
+    # Define custom callback for proper PEFT saving
+    from transformers import TrainerCallback
     
-    # Use RegisterTrainer to properly handle emotion_ids
-    trainer = RegisterTrainer(
+    class SavePeftModelCallback(TrainerCallback):
+        def on_save(self, args, state, control, **kwargs):
+            checkpoint_folder = os.path.join(
+                args.output_dir, f"checkpoint-{state.global_step}"
+            )
+            kwargs["model"].save_pretrained(checkpoint_folder)
+            return control
+    # Use standard Trainer
+    trainer = Trainer(
         model=model,
         args=training_args,
         train_dataset=dataset["train"],
