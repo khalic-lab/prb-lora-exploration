@@ -6,8 +6,6 @@ https://github.com/khalic-lab/prb-lora-exploration
 
 ⸻
 
-Abstract
-
 We present Gated Bias Injection (GBI), a lightweight architectural extension to Low-Rank Adaptation (LoRA) that improves conditional text generation without increasing trainable parameter budgets.
 GBI augments LoRA with a small bank of learnable vectors (“registers”) whose contributions are dynamically gated based on the input sequence representation. The gated combination is projected to the model’s hidden size and injected as an additive bias to the final hidden states before prediction.
 
