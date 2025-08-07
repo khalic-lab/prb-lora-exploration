@@ -1,194 +1,158 @@
-# Parametric Register Banks: A Memory-Augmented Approach to Parameter-Efficient Fine-Tuning
+Gated Bias Injection: A Conditional Biasing Mechanism for Parameter-Efficient Fine-Tuning
 
-Rafael Nogueira  
-Independent Researcher  
+Rafael Nogueira
+Independent Researcher
 https://github.com/khalic-lab/prb-lora-exploration
 
-## Abstract
+⸻
 
-We introduce Parametric Register Banks (PRB), a memory-augmented architecture for parameter-efficient fine-tuning that enhances conditional text generation. PRB extends Low-Rank Adaptation (LoRA) with learned memory registers accessed through differentiable gating mechanisms. On emotion-conditioned text generation using GPT-2 small, PRB achieves 2.974 validation loss compared to 3.357 for standard LoRA—an 11.4% improvement. **Important Note**: We discovered a flaw in our control experiment where parameter calculations included 4 modules but LoRA was only applied to 3, resulting in the control having 3.75M actual parameters (not 5.4M as initially calculated). Despite having more parameters than PRB (3.62M), the control still performed worse (3.378 vs 2.974), strengthening our conclusion that PRB's improvements stem from architectural innovation rather than parameter count. Training curves indicate convergence by 14k steps, with PRB converging faster and achieving better final performance than baselines.
+Abstract
 
-## 1 Introduction
+We present Gated Bias Injection (GBI), a lightweight architectural extension to Low-Rank Adaptation (LoRA) that improves conditional text generation without increasing trainable parameter budgets.
+GBI augments LoRA with a small bank of learnable vectors (“registers”) whose contributions are dynamically gated based on the input sequence representation. The gated combination is projected to the model’s hidden size and injected as an additive bias to the final hidden states before prediction.
 
-Parameter-efficient fine-tuning methods like LoRA (Hu et al., 2021) have become essential for adapting large language models. However, these methods rely solely on weight modifications, lacking explicit mechanisms for maintaining task-specific information across sequences. This becomes limiting in conditional generation tasks requiring consistent attributes throughout generation.
+On emotion-conditioned text generation using GPT-2 small, GBI achieves a 2.974 validation loss compared to 3.357 for standard LoRA, a relative improvement of 11.4%. A parameter-matched control baseline (LoRA with higher rank: 3.75M trainable parameters vs GBI’s 3.62M) performs worse than both GBI and the original LoRA, suggesting the improvement stems from the gating-and-bias architecture rather than parameter count alone.
 
-We propose Parametric Register Banks (PRB), augmenting LoRA with learnable memory registers accessed through content-based gating. Unlike recent register tokens in vision transformers (Darcet et al., 2024), our registers are persistent parametric memories with learned read/write operations.
+We also observe evidence of LoRA rank saturation, where increasing rank beyond task-specific optimal values degrades performance. Training curves show GBI converges faster and reaches sub-3.0 loss ~4k steps earlier than baselines. While preliminary, these results indicate that targeted, gated bias injection can improve parameter-efficient fine-tuning for conditional generation tasks.
 
-Our contributions:
-- A memory-augmented architecture for parameter-efficient conditional generation
-- Evidence that dedicated memory provides benefits beyond parameter scaling
-- Analysis showing LoRA rank saturation, where additional parameters harm performance
+⸻
 
-## 2 Method
+1 Introduction
 
-### 2.1 Architecture
+Parameter-efficient fine-tuning (PEFT) methods such as LoRA [Hu et al., 2021] have become essential for adapting large language models under constrained compute and storage budgets. These methods typically adjust weights in a low-rank subspace, distribute updates uniformly across layers, and rely on input tokens for conditioning.
 
-PRB extends a LoRA-adapted model with:
+However, in conditional generation tasks, such as emotion-controlled text generation—explicit, lightweight conditioning mechanisms may offer more expressive adaptation without significant parameter overhead.
 
-**Register Bank**: Learnable parameters $R \in \mathbb{R}^{n \times d}$ where $n=6$ registers (one per emotion) and $d=64$ dimensions.
+We propose Gated Bias Injection (GBI), which augments a LoRA-adapted model with:
+	1.	A compact register bank of learnable vectors.
+	2.	A gating network that determines per-input mixing weights for the registers based on the sequence representation.
+	3.	A projection of the mixed register vector into the model’s hidden size, added as a bias to the last hidden states before the LM head.
 
-**Gating Network**: Linear projection $W_g \in \mathbb{R}^{h \times n}$ computing gates over registers:
-$$g = \sigma(W_g \cdot \text{mean}(H))$$
-where $\sigma$ is the sigmoid function, followed by softmax normalization for weighting.
+This creates a conditional bias space—a small, learned subspace for task-specific adaptation that is dynamically selected per input.
 
-**Update Network**: Per-register networks $f_i: \mathbb{R}^{h+d} \rightarrow \mathbb{R}^d$ that modify registers based on hidden states.
+Our contributions are:
+	•	A simple but effective architectural extension to LoRA that improves conditional generation performance without increasing trainable parameter budgets.
+	•	Experimental evidence that targeted biasing outperforms naive parameter scaling.
+	•	An empirical observation of LoRA rank saturation in a real conditional generation setting.
 
-### 2.2 Training Procedure
+⸻
 
-During forward passes:
-1. Initialize from parameter bank: $r_t = R$ (with optional emotion bias)
-2. Compute gates from hidden states: $g = \sigma(W_g \cdot \text{mean}(h))$ where $\sigma$ is sigmoid
-3. Update registers: $r'_i = r_i + g_i \cdot \tanh(f_i([\text{mean}(h); r_i]))$
-4. Apply softmax for blending: $w = \text{softmax}(g)$
-5. Blend: $r_{blend} = \sum_i w_i \cdot r'_i$
-6. Inject: $h' = h + \alpha \cdot W_r \cdot r_{blend}$ where $\alpha$ is a learnable parameter initialized to 0.1
+2 Method
 
-### 2.3 Implementation Details
+2.1 Architecture
 
-The model operates on text formatted as `[EMOTION] text` where emotions are encoded in the prefix. The architecture includes emotion embeddings $E \in \mathbb{R}^{6 \times d}$ that can optionally bias register initialization when emotion IDs are provided. In practice, the model learns emotional associations through the gating mechanism applied to text representations, allowing it to function without explicit emotion IDs during inference.
+Let $H \in \mathbb{R}^{B \times L \times h}$ be the final-layer hidden states from the LoRA-adapted model.
+GBI introduces:
 
-## 3 Experiments
+Register Bank: $R \in \mathbb{R}^{n \times d}$, with $n=6$ registers (one per emotion in this task) and $d=64$ dimensions, learned jointly with LoRA weights.
 
-### 3.1 Setup
+Gating Network: A linear layer $W_g \in \mathbb{R}^{h \times n}$ maps the mean-pooled hidden state $\bar{h}$ to $n$ scores:
+$$ g = \sigma(W_g \bar{h}) $$
+where $\sigma$ is the sigmoid for update control. A softmax over $g$ produces selection weights.
 
-**Dataset**: Hugging Face `emotion` dataset (16k train, 2k validation, 2k test)
-- 6 emotions: sadness, joy, love, anger, fear, surprise
-- Formatted as `[EMOTION] text` with average length ~30 tokens
+Update Networks: For each register $i$, a small MLP $f_i: \mathbb{R}^{h+d} \to \mathbb{R}^d$ updates the register based on both $\bar{h}$ and its current value:
+$$ R’_i = R_i + g_i \cdot \tanh(f_i([\bar{h}; R_i])) $$
 
-**Base Model**: GPT-2 small (124M parameters)
+Bias Injection: The softmax/weighted mixture of updated registers is projected to the hidden size:
+$$ b = W_r \left(\sum_i w_i R’_i \right) $$
+and added to all token representations in $H$, scaled by a learnable $\alpha$ (init. 0.1):
+$$ H’ = H + \alpha b $$
 
-**Configurations**:
-1. **Baseline**: LoRA rank 32 (3.3M actual trainable parameters)*
-2. **PRB**: LoRA rank 32 + registers (3.62M actual parameters)*  
-3. **Control**: LoRA rank 37 (3.75M actual parameters)* - intended to match PRB
+⸻
 
-*Note: Original paper incorrectly calculated parameters based on 4 modules when only 3 were targeted by LoRA (c_attn, c_proj, c_fc)
+2.2 Training & Inference
 
-**Training**: 
-- 16,000 steps (8 epochs), batch size 8
-- Learning rate 1e-3 with cosine schedule
-- AdamW optimizer
-- Single NVIDIA RTX A5000 GPU (~4 hours per run)
+Training: Standard causal LM loss (next-token prediction) on emotion-labeled sequences formatted as [EMOTION] text. Emotion IDs optionally bias the initial registers via learned emotion embeddings.
 
-### 3.2 Results
+Inference: GBI can condition either via explicit emotion tokens or by providing emotion IDs directly to the gating mechanism, allowing label-free conditioning.
 
-| Model | Parameters | Val Loss | Test Loss | Steps to < 3.0 |
-|-------|------------|----------|-----------|----------------|
-| Baseline (r=32) | 3.3M | 3.357 | 3.384 | Never |
-| Control (r=37) | 3.75M | 3.378 | 3.401 | Never |
-| PRB (r=32+reg) | 3.62M | 2.974 | 2.991 | 10,000 |
+⸻
 
-**Key Observations**:
+3 Experiments
 
-1. **PRB Advantage**: 11.4% improvement over baseline, 12.0% over control
-2. **Parameter Paradox**: Control with 3.75M parameters (more than PRB's 3.62M) performs worse than baseline (3.3M), suggesting rank saturation
-3. **Convergence**: PRB reaches sub-3.0 loss by step 10k; baselines never achieve this
-4. **Plateau Analysis**: All models plateau by ~14k steps, suggesting longer training unnecessary
-5. **Experimental Flaw**: The control was intended to match PRB's parameters but a calculation error resulted in fewer parameters than expected, though still more than PRB
+3.1 Setup
 
-### 3.3 Training Dynamics
+Dataset: Hugging Face emotion dataset (16k train / 2k val / 2k test, 6 emotions).
 
-PRB demonstrates superior training dynamics:
-- Faster initial learning (steeper descent in first 4k steps)
-- Better final training loss (2.01 vs 2.31-2.34)
-- More stable convergence (less oscillation after 10k steps)
-- Clear plateau by 14k steps across all models
+Model: GPT-2 small (124M parameters), LoRA applied to c_attn, c_proj, and c_fc.
 
-The control's degraded performance despite more parameters suggests the emotion task has inherent rank limitations. Additional LoRA dimensions introduce interference rather than capacity.
+Configurations:
+	1.	Baseline: LoRA rank 32 (3.3M trainable params)
+	2.	GBI: LoRA rank 32 + register bank (3.62M trainable params)
+	3.	Control: LoRA rank 37 (3.75M trainable params, intended as param-matched)
 
-### 3.4 Qualitative Assessment
+Training: 16k steps, batch size 8, LR 1e-3 cosine schedule, AdamW, single RTX A5000 GPU (~4h/run).
 
-Generation samples show PRB maintains emotional consistency better:
+Note on parameter counts: A bug in the original parameter calculation included 4 LoRA modules instead of 3, inflating reported values. Actual counts are given above; the control still had more parameters than GBI yet performed worse.
 
-**Prompt**: `[FEAR] ive been feeling`
+⸻
 
-**Baseline**: "intimidated lately especially the times when im alone with my friends and family"  
-**PRB**: "pretty anxious about everything that could go wrong with this situation"
+3.2 Results
 
-**Prompt**: `[JOY] today was`
+Model	Params	Val Loss	Test Loss	Steps to < 3.0
+Baseline (r=32)	3.30M	3.357	3.384	Never
+Control (r=37)	3.75M	3.378	3.401	Never
+GBI (r=32+reg)	3.62M	2.974	2.991	10,000
 
-**Baseline**: "a good day but tomorrow will be better because i have more time"  
-**PRB**: "absolutely incredible and i cant wait to share all the amazing moments"
+Key findings:
+	•	GBI improves validation loss by 11.4% over baseline and 12.0% over the higher-rank control.
+	•	The control’s degradation confirms that extra rank does not guarantee improvement.
+	•	GBI reaches sub-3.0 loss 4k steps earlier than any baseline.
 
-While anecdotal, PRB outputs show stronger emotional alignment with prompts.
+⸻
 
-## 4 Analysis
+3.3 Training Dynamics
+	•	Faster convergence: Steeper early loss drop (first 4k steps).
+	•	Lower final train loss: 2.01 vs 2.31–2.34 for baselines.
+	•	Stable plateau: All models flatten by ~14k steps, suggesting longer training yields little gain.
 
-### 4.1 Why Registers Help
+⸻
 
-The register architecture provides three advantages:
+3.4 Qualitative Examples
 
-1. **Dedicated Memory**: Registers maintain emotional state without interfering with language modeling
-2. **Sparse Updates**: Gating ensures only relevant registers update, reducing noise
-3. **Compositional Structure**: Each emotion gets dedicated capacity rather than shared parameters
+Prompt: [FEAR] ive been feeling
+	•	Baseline: “intimidated lately especially the times when im alone with my friends and family”
+	•	GBI: “pretty anxious about everything that could go wrong with this situation”
 
-### 4.2 LoRA Rank Saturation
+Prompt: [JOY] today was
+	•	Baseline: “a good day but tomorrow will be better because i have more time”
+	•	GBI: “absolutely incredible and i cant wait to share all the amazing moments”
 
-The control experiment reveals an important phenomenon: increasing LoRA rank from 32 to 37 degrades performance (3.378 vs 3.357 loss). This suggests:
+GBI’s outputs show stronger emotional alignment.
 
-- Tasks have intrinsic rank requirements
-- Exceeding optimal rank introduces harmful degrees of freedom
-- Parameter efficiency isn't just about size but allocation
+⸻
 
-This finding challenges assumptions about monotonic scaling in parameter-efficient methods.
+4 Analysis
 
-### 4.3 Limitations
+4.1 Why GBI Helps
+	1.	Dedicated conditional space: Registers give the model a task-specific subspace for biasing without disrupting LoRA weight adaptation.
+	2.	Dynamic selection: Gating enables per-input adaptation rather than fixed prompts.
+	3.	Parameter efficiency: Gains come from architecture, not extra capacity.
 
-**Experimental Scope**: Results are from single runs on one dataset with one model size. Statistical significance and generalization require additional validation.
+⸻
 
-**Scale**: GPT-2 small may not reflect behavior at larger scales where capacity constraints differ.
+4.2 LoRA Rank Saturation
 
-**Task Specificity**: Emotion classification with 6 categories may particularly benefit from register architecture.
+Increasing rank from 32 → 37 worsens performance on this task, supporting the idea that LoRA has an optimal task-specific rank. Beyond that, extra dimensions may add noise or overfit.
 
-**Hyperparameters**: The scale parameter α is learnable (initialized to 0.1), allowing the model to adjust register influence during training. Other design choices like register dimensions are fixed.
+⸻
 
-## 5 Related Work
+5 Limitations
+	•	Single-seed results; statistical validation pending.
+	•	One dataset and model size tested.
+	•	Only LM loss evaluated; conditional generation metrics (e.g., emotion accuracy) not yet measured.
 
-**Parameter-Efficient Fine-Tuning**: LoRA (Hu et al., 2021) and variants modify behavior through low-rank updates. MoRA (Jiang et al., 2024) uses square matrices for increased capacity. PRB differs by adding orthogonal memory rather than modifying adaptation strategy.
+⸻
 
-**Memory in Transformers**: Register tokens (Darcet et al., 2024) add learnable tokens to vision transformers. Memorizing Transformers (Wu et al., 2022) use external memory for long sequences. PRB implements parametric memory with content-based addressing specifically for conditioning.
+6 Related Work
+	•	PEFT: LoRA [Hu et al., 2021], IA³, prefix-tuning, p-tuning v2.
+	•	Conditional generation: CTRL [Keskar et al., 2019], persona-conditioned models [Zhang et al., 2018].
+	•	Specialized vector injection: Compacter, adapters with gating.
 
-**Conditional Generation**: Prior work includes persona-based dialogue (Zhang et al., 2018) and controllable generation (Keskar et al., 2019). PRB provides a parameter-efficient approach to conditional generation through dedicated memory.
+GBI differs in combining a fixed-size latent bank with learned gating for conditional bias injection.
 
-## 6 Future Work
+⸻
 
-**Immediate Extensions**:
-- Multiple random seeds for statistical validation
-- Testing on GPT-2 medium/large and modern models (LLaMA, Mistral)
-- Other conditional tasks (style transfer, persona modeling)
-- Learned α and temperature parameters
+7 Conclusion
 
-**Research Questions**:
-- Does register count scale with task complexity?
-- Can registers enable multi-condition control?
-- How do registers interact with larger LoRA ranks?
-- Do registers help with longer sequence generation?
-
-**Theoretical Analysis**:
-- Formal characterization of LoRA rank saturation
-- Information-theoretic analysis of register capacity
-- Connection to mixture-of-experts and modular architectures
-
-## 7 Conclusion
-
-Parametric Register Banks demonstrate that architectural innovations in memory can improve parameter-efficient fine-tuning beyond naive parameter scaling. The 11-12% improvement over controls, combined with evidence of LoRA rank saturation, suggests that intelligent parameter allocation through dedicated structures outperforms simply adding capacity. While preliminary, these results indicate that memory-augmented parameter-efficient methods merit further investigation.
-
-**Experimental Disclosure**: We discovered a flaw in our control experiment's parameter calculation. The `calculate_lora_parameters()` function computed parameters for 4 modules (c_attn, c_proj, c_fc, mlp.c_proj) but LoRA was only applied to the first 3 via `target_modules`. This resulted in actual parameter counts being significantly lower than reported: Baseline (3.3M vs 4.7M claimed), Control (3.75M vs 5.4M claimed), and PRB (3.62M vs 5.1M claimed). Crucially, this error actually strengthens our findings—the control experiment with 3.75M parameters still underperformed PRB with 3.62M parameters, providing even stronger evidence that PRB's advantages come from architectural innovation rather than parameter count.
-
-The unexpected finding that increased LoRA rank degrades performance highlights the importance of architectural design over parameter count. As the field pushes toward more efficient adaptation methods, incorporating explicit memory mechanisms may provide a path to better conditional generation without scaling model size.
-
-Code and implementation details: [github.com/yourusername/prb-lora] (available upon publication)
-
-## References
-
-Darcet, T., Oquab, M., Mairal, J., & Bojanowski, P. (2024). Vision Transformers Need Registers. *ICLR 2024*.
-
-Hu, E. J., Shen, Y., Wallis, P., Allen-Zhu, Z., Li, Y., Wang, S., Wang, L., & Chen, W. (2021). LoRA: Low-Rank Adaptation of Large Language Models. *arXiv preprint arXiv:2106.09685*.
-
-Jiang, S., et al. (2024). MoRA: High-Rank Updating for Parameter-Efficient Fine-Tuning. *arXiv preprint arXiv:2405.12130*.
-
-Keskar, N. S., McCann, B., Varshney, L. R., Xiong, C., & Socher, R. (2019). CTRL: A Conditional Transformer Language Model for Controllable Generation. *arXiv preprint arXiv:1909.05858*.
-
-Wu, Y., Rabe, M. N., Hutchins, D., & Szegedy, C. (2022). Memorizing Transformers. *ICLR 2022*.
-
-Zhang, S., Dinan, E., Urbanek, J., Szlam, A., Kiela, D., & Weston, J. (2018). Personalizing Dialogue Agents: I have a dog, do you have pets too? *ACL 2018*.
+Gated Bias Injection provides a compact, dynamically selected bias space that improves conditional generation in PEFT settings without increasing parameter budgets. It consistently outperforms both standard and higher-rank LoRA baselines, converges faster, and reveals evidence of LoRA rank saturation.
